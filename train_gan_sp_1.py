@@ -144,8 +144,15 @@ class StateGAN(StateGenerator):
         normalized_states = (states - self.state_center) / self.state_bounds[1][0]
         return self.gan.train(normalized_states, labels, self.gan_configs)
 
+    def train_with_uniform_data(self, states, labels, outer_iters=None, generator_iters=None, discriminator_iters=None):
+        normalized_states = (states - self.state_center) / self.state_bounds[1][0]
+        return self.gan.train_with_uniform_data(normalized_states, labels, self.gan_configs)
+
     def discriminator_predict(self, states):
         return self.gan.discriminator_predict(states)
+    
+    def add_uniform_data(self, uniform_data):
+        self.gan.uniform_data = uniform_data
 
 def generate_initial_goals(num_case, start_boundary, agent_num):
     pos_dim = 2  #坐标维度
@@ -170,12 +177,8 @@ def generate_uniform_goals(num_case, start_boundary, agent_num):
     goals = np.zeros((num_case, (agent_num + agent_num)*pos_dim), dtype = float)
     for j in range(num_case):
         for i in range(agent_num):
-            landmark_location = np.array([np.random.uniform(start_boundary[0],start_boundary[1]),np.random.uniform(start_boundary[2],start_boundary[3])])
-            one_starts_landmark[i] = landmark_location
-        indices = random.sample(range(agent_num), agent_num)
-        for  k in indices:
-            epsilon = -2 * 0.01 * random.random() + 0.01
-            one_starts_agent[k] = one_starts_landmark[k]+epsilon
+            one_starts_landmark[i] = np.array([np.random.uniform(start_boundary[0],start_boundary[1]),np.random.uniform(start_boundary[2],start_boundary[3])])
+            one_starts_agent[i] = np.array([np.random.uniform(start_boundary[0],start_boundary[1]),np.random.uniform(start_boundary[2],start_boundary[3])])
         goals[j] = np.concatenate((one_starts_agent, one_starts_landmark), axis=None)
     return goals
 
@@ -375,7 +378,7 @@ def main():
    
     boundary = 3
     start_boundary = [-0.3,0.3,-0.3,0.3] # 分别代表x的范围和y的范围
-    # start_boundary = [2.4,3.0,2.4,3.0]
+    uniform_boundary = [-boundary,boundary,-boundary,boundary]
     max_step = 0.6
     N_easy = 0
     test_flag = 0
@@ -399,7 +402,9 @@ def main():
     gan_configs['goal_center'] = np.zeros((num_agents + num_agents)* 2, dtype=float)
     gan_configs['goal_size'] = (num_agents + num_agents)*2
     gan = StateGAN(gan_configs = gan_configs, state_range=gan_configs['goal_range'])
-    feasible_goals = generate_initial_goals(num_case = 10000, start_boundary = start_boundary, agent_num = args.num_agents)                            
+    feasible_goals = generate_initial_goals(num_case = 10000, start_boundary = start_boundary, agent_num = args.num_agents)   
+    uniform_goals = generate_uniform_goals(num_case = 10000, start_boundary = uniform_boundary, agent_num = args.num_agents)     
+    gan.add_uniform_data(uniform_goals)                       
     dis_loss, gen_loss = gan.pretrain(states=feasible_goals, outer_iters=gan_configs['gan_outer_iters'])
     print('discriminator_loss:',str(dis_loss.cpu()), 'generator_loss:',str(gen_loss.cpu()))
     
@@ -587,7 +592,7 @@ def main():
                     if R_i < goal_configs['R_max'] and R_i > goal_configs['R_min']:
                         labels[i] = 1
                         filtered_raw_goals.append(goals[i])
-                gan.train(goals, labels)
+                gan.train_with_uniform_data(goals, labels)
                 all_goals.append(filtered_raw_goals)
                 end_time = time.time()
                 print("Gan training time: %.2f"%(end_time-start_time))

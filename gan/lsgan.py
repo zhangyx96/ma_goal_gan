@@ -104,6 +104,7 @@ class LSGAN(object):
         #                                         {'params':self.generator_discriminator.parameters()}], lr=gan_configs['lr'])
         self.optimizer_D = torch.optim.RMSprop(self.discriminator.parameters(), lr=gan_configs['lr'])
         self.Tensor = torch.cuda.FloatTensor if gan_configs['cuda'] else torch.FloatTensor
+        self.uniform_data = None
     
     def sample_random_noise(self, size):
         return np.random.randn(size, self.noise_size)
@@ -137,6 +138,41 @@ class LSGAN(object):
             sample_output = self.discriminator(train_X)
             self.optimizer_D.zero_grad()
             discriminator_loss = torch.mean((2*train_Y - 1 - sample_output)**2)
+            discriminator_loss.backward()
+            self.optimizer_D.step()
+            # Train Generator
+            generator_output = self.discriminator(generated_X)
+            self.optimizer_G.zero_grad()
+            generator_loss = torch.mean((generator_output - 1)**2)
+            generator_loss.backward()
+            self.optimizer_G.step()
+            # wandb.log({'discriminator_loss': discriminator_loss})
+            # wandb.log({'generator_loss': generator_loss})
+        return discriminator_loss, generator_loss
+
+    
+    def train_with_uniform_data(self, X, Y, gan_configs):
+        batch_size = gan_configs['batch_size']
+        batch_feed_X = batch_feed_array(X, batch_size)
+        batch_feed_Y = batch_feed_array(Y, batch_size)
+        if self.uniform_data is not None:
+            batch_feed_U = batch_feed_array(self.uniform_data, batch_size*2)
+        generated_Y = self.Tensor(np.zeros((batch_size, self.discriminator_output_size)))
+        for epoch in range(self.gan_configs['gan_outer_iters']):
+            sample_X = self.Tensor(next(batch_feed_X))
+            sample_Y = self.Tensor(next(batch_feed_Y))
+            sample_U = self.Tensor(next(batch_feed_U))
+            generated_X, random_noise = self.sample_generator(batch_size)
+            generated_X_copy = generated_X.detach()
+            train_X = torch.cat((sample_X, generated_X_copy), dim=0)
+            train_Y = torch.cat((sample_Y, generated_Y), dim=0)
+            
+            
+            # Train Discriminator
+            sample_output = self.discriminator(train_X)
+            uniform_output = self.discriminator(sample_U)
+            self.optimizer_D.zero_grad()
+            discriminator_loss = torch.mean((2*train_Y - 1 - sample_output)**2) + torch.mean(uniform_output - sample_output)
             discriminator_loss.backward()
             self.optimizer_D.step()
             # Train Generator
